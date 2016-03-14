@@ -1,0 +1,285 @@
+= ConfigMaps
+{product-author}
+{product-version}
+:data-uri:
+:icons:
+:experimental:
+:toc: macro
+:toc-title:
+
+toc::[]
+
+== Overview
+
+The `ConfigMap` object type provides a mechanism to hold non-sensitive
+configuration information such as whole configuration files, property values,
+etc. ConfigMaps separate configuration data from the pods that use it and can
+be mounted into containers using a volume plug-in or injected as an
+environment variable.  This topic discusses important properties of ConfigMaps
+and provides an overview on how developers can use them.
+
+ConfigMaps is similar to the link:secrets.html[Secrets] type, but is
+designed for use with non-sensitive information.  For sensitive information,
+use Secret instead of ConfigMap. 
+
+====
+----
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "example-configmap"
+  },
+  "namespace": "my-namespace",
+  "data": { <1>
+    "should-work-right": "true",
+    "sometimes-be-confusing": "false"
+    "whole-files-supported": "supported=why yes they are\nhow-enthusiastically=gladly"
+    }
+}
+----
+<1> The allowable format for the keys in the `data` field must meet the
+guidelines in the *DNS_SUBDOMAIN* value in
+https://github.com/GoogleCloudPlatform/kubernetes/blob/v1.0.0/docs/design/identifiers.md[the
+Kubernetes identifiers glossary].
+====
+
+[[properties-of-configmaps]]
+
+== Properties of ConfigMaps
+
+Key properties include:
+
+- Configuration data can be referenced independently from its definition.
+- Configuration data can be shared within a namespace.
+
+[[configmaps-and-the-pod-lifecycle]]
+
+=== ConfigMaps and the Pod Lifecycle
+A ConfigMap must be created before the pods that depend on it.
+
+ConfigMaps are consumed in pods either as files in a volume, or environment variables.
+
+Once a pod is created, if a ConfigMap that pod references is changed, the
+behavior the user sees depends on how the pod consumes the ConfigMap. If the
+pod consumes a ConfigMap as an environment variable, then the value of that
+environment variable is not updated if the ConfigMap is changed. In order to
+observe new values for a ConfigMap, a pod must consume that ConfigMap in a
+volume.  The ConfigMap volume plugin provides an eventually consistent view of
+a ConfigMap, and will update after the ConfigMap is updated.
+
+[[creating-and-using-configmaps]]
+
+== Creating and Using ConfigMaps
+When creating ConfigMaps:
+
+- Create a ConfigMap object
+- Create a pod that references the ConfigMap with one of:
+  - a volume of type `configMap` and a container to mount the volume
+  - an environment variable whose value comes from a ConfigMap
+
+[[creating-configmaps]]
+
+=== Creating ConfigMaps
+
+There are a number of ways to create a ConfigMap object.
+
+==== Creating ConfigMaps from JSON or YAML files
+
+The first, most basic, way to create a ConfigMap object is to use the
+following command, where the json file is a predefined ConfigMap:
+
+====
+----
+$ oc create -f configmap.json
+----
+====
+
+This method also works with yaml files.
+
+==== Creating ConfigMaps from literal values
+
+There is also a special command to ease creating ConfigMaps called `oc create
+configmap`, which allows creating configmaps from literal values, files, or
+directories.
+
+To create a ConfigMap from literal values, you can use:
+
+====
+----
+$ oc create configmap example-config-1 --from-literal=property1=value1 --from-literal=property2=value2
+----
+====
+
+This will result in a ConfigMap named `example-config-1` being created, with
+two keys, `property1` and `property2`, whose values are `value1` and `value2`,
+respectively.
+
+==== Creating ConfigMaps from directories
+
+It is also possible to create a ConfigMap from the files in a directory:
+
+====
+----
+$ oc create configmap example-config-2 --from-file=path/to/directory
+----
+====
+
+This will result in a ConfigMap named `example-config-2` being created which
+has a key named for each file in the given directory, whose value will be the
+contents of that file.  Subdirectories are ignored.
+
+==== Creating ConfigMaps from individual files
+
+It is also possible to create a ConfigMap from different files:
+
+====
+----
+$ oc create configmap example-config-3 --from-file=/path/to/file1 --from-file=/path/to/file2
+----
+====
+
+This will result on a ConfigMap named `example-config-3` being created, with
+keys `file1` and `file2`, whose values are the contents of file1 and file2,
+respectively.
+
+[[configmaps-in-volumes]]
+
+=== ConfigMaps in Volumes
+
+ConfigMaps can be consumed in a volume in one of two ways.  The most simple way is
+to just provide the name of the ConfigMap that should populate the volume.  In this case,
+the volume will be populated by a file for each key in the ConfigMap, where the name of
+the file is the name of the key and the content of the file is a the value for that key.
+
+If more control is desired, a list of projections of keys into relative paths
+within the volume can also be provided.  In this case, the volume will be
+populated only by the files for which projections are specified, and the path
+will be determined by the path of the projection.
+
+In either case, the volume is an eventually consistent view of the ConfigMap
+being consumed; if the ConfigMap is updated, the data in the volume will be
+updated.
+
+See link:#examples[Examples].
+
+[[configmaps-in-environment-variables]]
+
+=== ConfigMaps in Environment Variables
+
+ConfigMaps can also be consumed in environment variables.  Environment variables populated by ConfigMaps
+are not updated when the ConfigMap is updated.
+
+See link:#examples[Examples].
+
+[[restrictions]]
+
+== Restrictions
+ConfigMap volume sources are validated to ensure that the specified object
+reference points to a `*ConfigMap*` object. Therefore, a ConfigMap needs to be created
+before the pods that depend on it.
+
+ConfigMap API objects reside in a namespace. They can only be referenced by pods in
+that same namespace.
+
+Individual ConfigMaps are limited to 1MB in size. This is to discourage the
+creation of large ConfigMaps that would exhaust apiserver and kubelet memory.
+However, creation of a number of smaller ConfigMaps could also exhaust memory.
+
+[[configmap-data-keys]]
+
+=== ConfigMap Data Keys
+ConfigMap keys must be in a DNS subdomain.
+
+[[examples]]
+
+== Examples
+
+All of the following examples use a ConfigMap named `example-config` with keys `key-1` and `key-2`.
+
+.YAML of a Pod Consuming a ConfigMap in a Volume
+====
+
+[source,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-example-pod
+spec:
+  containers:
+    - name: configmap-test-container
+      image: busybox
+      command: [ "/bin/sh", "-c", "cat /etc/configmap-volume/*" ]
+      volumeMounts:
+          # name must match the volume name below
+          - name: configmap-volume
+            mountPath: /etc/configmap-volume
+            readOnly: true
+  volumes:
+    - name: configmap-volume
+      configMap:
+        name: example-config
+  restartPolicy: Never
+----
+====
+
+.YAML of a Pod Consuming a ConfigMap in a Volume with Specific Paths
+====
+
+[source,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-example-pod
+spec:
+  containers:
+    - name: configmap-test-container
+      image: busybox
+      command: [ "/bin/sh", "-c", "cat /etc/configmap-volume/*" ]
+      volumeMounts:
+          # name must match the volume name below
+          - name: configmap-volume
+            mountPath: /etc/configmap-volume
+            readOnly: true
+  volumes:
+    - name: configmap-volume
+      configMap:
+        name: example-config
+        items:
+        - key: key-1
+          path: special/path/to/key-1.blob
+  restartPolicy: Never
+----
+
+In this example, the value of the `key-1` key will be present under the volume at `special/path/to/key-1.blob` instead of `key-1`.
+
+
+.YAML of a Pod Consuming ConfigMap in an Environment Variable
+====
+
+[source,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-env-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: busybox
+      command: [ "/bin/sh", "-c", "echo $(SPECIAL_KEY_1) $(SPECIAL_KEY_2)" ]
+      env:
+        - name: SPECIAL_LEVEL_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: example-config
+              key: key-1
+        - name: SPECIAL_TYPE_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: example-config
+              key: key-2
+  restartPolicy: Never
+----
